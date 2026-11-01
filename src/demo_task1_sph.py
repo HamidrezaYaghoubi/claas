@@ -29,11 +29,17 @@ import random
 
 import threading
 generation_lock = threading.Lock()
+base_cache = None
 
 def generate_base(**generate_kwargs):
-	# summary + explanation: same model, fine-tuned adapter switched off
+	# summary + explanation: same model, fine-tuned adapter switched off,
+	# with its own generation cache as a separately loaded base model would have
+	global base_cache
+	inner = model.get_base_model()
+	main_cache, inner._cache = inner._cache, base_cache
 	with model.disable_adapter():
 		model.generate(**generate_kwargs)
+	base_cache, inner._cache = inner._cache, main_cache
 
 device ='cuda' if torch.cuda.is_available() else 'cpu'
 
