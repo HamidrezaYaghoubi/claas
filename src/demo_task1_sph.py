@@ -30,7 +30,12 @@ import random
 import threading
 generation_lock = threading.Lock()
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+def generate_base(**generate_kwargs):
+	# summary + explanation: same model, fine-tuned adapter switched off
+	with model.disable_adapter():
+		model.generate(**generate_kwargs)
+
+device ='cuda' if torch.cuda.is_available() else 'cpu'
 
 TRAIT_VALUES = {
 	"Gender": [
@@ -460,8 +465,8 @@ def vlm_response(user_input, history, health_topic,
 					{"type": "text", "text": SYSTEM_PROMPT + USER_PROMPT}
 				]}
 			]
-			input_text = tokenizer_aux.apply_chat_template(messages, add_generation_prompt = True)
-			inputs = tokenizer_aux(
+			input_text = tokenizer.apply_chat_template(messages, add_generation_prompt = True)
+			inputs = tokenizer(
 				# image.convert("RGB"),
 				input_text,
 				add_special_tokens = False,
@@ -484,7 +489,7 @@ def vlm_response(user_input, history, health_topic,
 			)
 			# separate thread to run generation
 			thread = threading.Thread(
-				target=model_aux.generate,
+				target=generate_base,
 				kwargs=generate_kwargs
 			)
 			thread.start()
@@ -493,10 +498,13 @@ def vlm_response(user_input, history, health_topic,
 				f"Emulated traits:\n {demo_info}\n" + '='*20 + "\n\n", 
 				image_desc + "\n\n"
 			]
-			for new_token in streamer_aux:
-				outputs.append(new_token)
-				final_output = ''.join(outputs)
-				yield final_output
+			try:
+				for new_token in streamer_aux:
+					outputs.append(new_token)
+					final_output = ''.join(outputs)
+					yield final_output
+			finally:
+				thread.join() # the adapter must be back on before anything else runs
 
 			# text representation of final response
 			response = "".join(outputs[2:]) # ignore trait summary & image description
@@ -533,8 +541,8 @@ def vlm_response(user_input, history, health_topic,
 					{"type": "text", "text": SYSTEM_PROMPT + USER_PROMPT}
 				]}
 			]
-			input_text = tokenizer_aux.apply_chat_template(messages, add_generation_prompt = True)
-			inputs = tokenizer_aux(
+			input_text = tokenizer.apply_chat_template(messages, add_generation_prompt = True)
+			inputs = tokenizer(
 				image.convert("RGB"),
 				input_text,
 				add_special_tokens = False,
@@ -556,17 +564,20 @@ def vlm_response(user_input, history, health_topic,
 			)
 			# separate thread to run generation
 			thread = threading.Thread(
-				target=model_aux.generate,
+				target=generate_base,
 				kwargs=generate_kwargs
 			)
 			thread.start()
 			# stream out generation
 			# outputs = [image_desc + "\n\n"]
 			outputs += ["\n"]
-			for new_token in streamer_aux:
-				outputs.append(new_token)
-				final_output = ''.join(outputs)
-				yield final_output
+			try:
+				for new_token in streamer_aux:
+					outputs.append(new_token)
+					final_output = ''.join(outputs)
+					yield final_output
+			finally:
+				thread.join()
 			
 
 			return answer
@@ -653,10 +664,13 @@ def vlm_response(user_input, history, health_topic,
 			thread.start()
 			# stream out generation
 			outputs = [f"Emulated traits:\n {demo_info}\n" + '='*20 + "\n\n"]
-			for new_token in streamer:
-				outputs.append(new_token)
-				final_output = ''.join(outputs)
-				yield final_output
+			try:
+				for new_token in streamer:
+					outputs.append(new_token)
+					final_output = ''.join(outputs)
+					yield final_output
+			finally:
+				thread.join()
 
 """###########################################################################
 	Evaluate a given model (specified in model_cfgs)
@@ -702,8 +716,10 @@ if __name__ == '__main__':
 	assert cfgs["vision"] == True, "Must have vision input"
 	if cfgs["vision"]:
 		#################################################
-		### (1) MAIN MODEL
+		### MAIN MODEL
 		###	=> response emulation, fine-tuned model
+		###	=> summary + explanation use the same model
+		###	   with its adapter off (generate_base)
 		#################################################
 		# WITH VISUAL STIMULI
 		model, tokenizer = FastVisionModel.from_pretrained(
@@ -717,29 +733,13 @@ if __name__ == '__main__':
 				tokenizer,
 				chat_template = "gemma-3",
 			)
-		#################################################
-		### (2) AUXILLIARY MODEL
-		### => summarization model
-		###	=> larger (12b) for better summarization
-		#################################################
-		model_aux, tokenizer_aux = FastVisionModel.from_pretrained(
-			model_name=cfgs["model_summarize"],
-			load_in_4bit=True,
-		)
-		FastVisionModel.for_inference(model)
-		if "gemma" in cfgs["model"]:
-			# gemma-specific tokenizer chat template
-			tokenizer_aux = get_chat_template(
-				tokenizer_aux,
-				chat_template = "gemma-3",
-			)
-	
+
 	# initialize streamer tokens
 	streamer = TextIteratorStreamer(
 		tokenizer, skip_prompt=True, skip_special_tokens=True
 	)
 	streamer_aux = TextIteratorStreamer(
-		tokenizer_aux, skip_prompt=True, skip_special_tokens=True
+		tokenizer, skip_prompt=True, skip_special_tokens=True
 	)
 	
 	"""=============================================

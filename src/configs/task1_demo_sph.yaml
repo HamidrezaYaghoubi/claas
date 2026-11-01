@@ -23,6 +23,3 @@ model: "unsloth/gemma-3-12b-it_task1_1_epochs_test_neutral_partialTraits"
 vision: true    # default 
 trait: true     # default
 version: ""
-
-
-model_summarize: "unsloth/gemma-3-12b-it"
