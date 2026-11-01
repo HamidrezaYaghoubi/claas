@@ -25,6 +25,7 @@ data/*.csv
 stimuli/*.png
 src/evals/*.csv  # this also contains the attribute information; 
 bench/
+plan.md
 
 
 # Ignore local env / caches
