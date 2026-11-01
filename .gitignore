@@ -23,7 +23,16 @@ src/__pycache_
 # Gated data access complying with IRB Regulation
 data/*.csv
 stimuli/*.png
-src/evals/*.csv  # this also contains the attribute information; 
+src/evals/*.csv  # this also contains the attribute information;
+bench/logs/
+bench/results*/
+
+
+# Benchmark artifacts
+bench/adapters/
+bench/posters/
+bench/posters_raw/
+bench/unsloth_compiled_cache/
 
 
 # Ignore local env / caches
