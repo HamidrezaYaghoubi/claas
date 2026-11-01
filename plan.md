@@ -3,7 +3,7 @@
 **Goal:** make the classroom app (`src/demo_task1_sph.py`) cheaper and faster to serve without changing what the model outputs.
 Steps are ordered from "intended to keep outputs unchanged" to "outputs may change". Each step is validated with the real trained adapter before it is kept.
 
-## Where we are today (measured with the real model)
+## The original app (measured with the real model)
 
 One poster request on an RTX A6000, model time only (no browser, network or queue time):
 
@@ -28,7 +28,7 @@ One poster request on an RTX A6000, model time only (no browser, network or queu
 - Each version run twice on the same A6000.
 - The shared files were checked as unchanged (identical checksums before and after every job).
 
-Scripts are `bench/step0_*.py` and `bench/step0_job.sh`; results are in `bench/results_step0/`, `bench/results_step0_run2/` and `bench/results_step0/control.json`. Results and job logs stay on the cluster, outside git, because the logs contain IRB-restricted survey text.
+The test scripts, results and job logs are in `bench/` on the cluster, outside git, because the logs contain IRB-restricted survey text.
 
 **Measured results:**
 
@@ -45,6 +45,7 @@ Scripts are `bench/step0_*.py` and `bench/step0_job.sh`; results are in `bench/r
 - **Part of the slowdown is longer text.** The one-model run generated 1.8% more tokens; generation speed was also 2–4% lower in every stage.
 
 **Still unverified:**
+- The one-model change as now written in `src/demo_task1_sph.py`. Step 0 tested it through a test wrapper; the real code has not been run yet, and it also waits for each generation thread.
 - Why the 2 numerical answers change. They come from the adapter-on model, which runs the same code in both versions.
 - The real adapter on a 24 GB A5000. The as-is app can't run there, so any A5000 comparison also includes a hardware change.
 - Browser-level timing.
@@ -54,8 +55,8 @@ Scripts are `bench/step0_*.py` and `bench/step0_job.sh`; results are in `bench/r
 
 | # | Change | Where | Expected effect |
 |---|---|---|---|
-| 1 | Show the poster description while it is being written | `demo_task1_sph.py:296` | Earlier first text. Inside the model the first token is ready after about 0.3 s (placeholder test), but that excludes image preparation and the browser, so measure end-to-end before quoting a number. Does not reduce total compute. |
-| 2 | Store the survey question text for the 9 topics in a config file, with the exact wording, order and filtering, instead of reading the full survey CSV on every request | `demo_task1_sph.py:331` | Speed effect unmeasured; the server no longer needs the IRB-restricted data |
+| 1 | Show the poster description while it is being written | `demo_task1_sph.py:301` | Earlier first text. Inside the model the first token is ready after about 0.3 s (placeholder test), but that excludes image preparation and the browser, so measure end-to-end before quoting a number. Does not reduce total compute. |
+| 2 | Store the survey question text for the 9 topics in a config file, with the exact wording, order and filtering, instead of reading the full survey CSV on every request | `demo_task1_sph.py:336` | Speed effect unmeasured; the server no longer needs the IRB-restricted data |
 | 3 | Fix robustness issues | `demo_task1_sph.py`, `requirements.txt` | No speed change (details below) |
 
 Step 3 covers these issues:
@@ -65,15 +66,15 @@ Step 3 covers these issues:
 - the streamers are global, which is safe today only because of the lock, so add error and cancellation handling;
 - the queue limit of 20 is smaller than a class.
 
-**Check:** the as-is app repeats itself exactly with fixed seeds, so every Phase 1 change must reproduce the Step 0 reference exactly, on the same GPU: all 108 numerical answers and all 36 complete responses. Run with `bench/step0_job.sh`.
+**Check:** the app repeats itself exactly with fixed seeds, so every Phase 1 change must reproduce the reference exactly, on the same GPU: all 108 numerical answers and all 36 complete responses. Step 4 is already in the code on this branch, so the reference is the one-model result, not the original app. Run with `bench/step0_job.sh`.
 
 ## Phase 2: may change outputs slightly (validate accuracy before keeping)
 
 | # | Change | Effect | Note |
 |---|---|---|---|
-| 4 | Load the 12B model once; switch the adapter off for the summary and explanation | **Measured with the real model:** memory −47% (28.0 → 14.8 GB), time +4–5%, 2 of 108 numerical answers changed by one point | First find why the 2 adapter-on answers change. If the cause can be removed, this moves back to Phase 1. Keep the switching inside the existing generation lock. |
+| 4 | Load the 12B model once; switch the adapter off for the summary and explanation | **Measured with the real model:** memory −47% (28.0 → 14.8 GB), time +4–5%, 2 of 108 numerical answers changed by one point | **In the code on branch `deployability`, not yet run.** Still open: why the 2 adapter-on answers change. If the cause can be removed, this moves back to Phase 1. The code waits for each generation thread inside the lock, so the adapter state can't leak into the next step or request. |
 | 5 | Numerical answers: reuse the shared part of the prompt (image + profile) for all questions, and take the most likely allowed digit instead of generating free text | Placeholder test: that step −48% (1.52 → 0.78 s), the full request −2.3%; evaluation script numerical part −67% | This combines two changes. First test the reuse alone with unchanged decoding. The −84% evaluation figure also drops the free-text answer. |
-| 6 | Load the summary model in inference mode (line 729 calls `for_inference(model)` twice and never on `model_aux`) | Unknown | Test against the reference |
+| 6 | Run the summary and explanation in inference mode (the original app never switched its second model) | Unknown | Comes with step 4, which removes the second model. Its effect was not tested on its own, so it may contribute to the text differences. |
 | 7 | Serve with an inference engine such as vLLM (several students at once, faster generation) | Not measured | The main route to a shorter total time and to serving a full class |
 | 8 | Merge the adapter into the model weights | Real model: the adapter-on step generated 7.8–8.2 tokens/s and the adapter-off steps 11.0–11.9. These are different steps, so this is only indicative; a merged model was not benchmarked | Conflicts with step 4: a merged adapter can't be switched off. It needs either a second base copy (memory goes back up) or using the fine-tuned model for every step, which would be Phase 3. |
 
