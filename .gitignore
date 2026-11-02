@@ -21,9 +21,10 @@ src/__pycache_
 
 
 # Gated data access complying with IRB Regulation
-data/*.csv
-data/*.xlsx
-stimuli/*.png
+data/*
+!data/README.md
+stimuli/*
+!stimuli/README.md
 src/evals/*.csv  # this also contains the attribute information; 
 bench/
 plan.md
